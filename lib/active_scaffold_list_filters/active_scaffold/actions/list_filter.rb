@@ -12,9 +12,9 @@ module ActiveScaffold::Actions
       active_scaffold_default_frontend_path = File.join(File.dirname(__FILE__), "../../../../app/views/")
       base.add_active_scaffold_path(active_scaffold_default_frontend_path)
 
-      base.before_filter :list_filter_authorized?, :only => [:list_filter, :export]
-      base.before_filter :init_filter_session_var
-      base.before_filter :do_list_filter
+      base.before_action :list_filter_authorized?, :only => [:list_filter, :export]
+      base.before_action :init_filter_session_var
+      base.before_action :do_list_filter
     end
 
     def index
@@ -28,36 +28,30 @@ module ActiveScaffold::Actions
     def export
       require 'csv' if RUBY_VERSION >= "1.9"
 
+      set_includes_for_columns
       page = find_page
       records = page.items
 
-      if records.empty?
-        export_columns = []
-      else
-        record_class = records.first.class
+      # if records.empty?
+      #   export_columns = []
+      # else
+      #   record_class = records.first.class
 
-        export_columns =  if record_class.respond_to?(:export_column_names)
-          record_class.export_column_names
-        else
-          record_class.column_names
-        end
-      end
+      #   export_columns =  if record_class.respond_to?(:export_column_names)
+      #     record_class.export_column_names
+      #   else
+      #     record_class.column_names
+      #   end
+      # end
 
-      export_as_csv(export_columns, records)
+      export_as_csv(records)
     end
 
-    def export_as_csv(columns, records)
+    def export_as_csv(records)
       fcsv_options = {}
 
       csv_lib = Object.const_defined?('CSV') ? CSV : FasterCSV
-      data = csv_lib.generate(fcsv_options) do |csv|
-        csv << columns
-        records.each do |record|
-          csv << columns.collect { |column|
-            record.send(column)
-          }
-        end
-      end
+      data = render_to_string( :partial => 'export', locals: { list_columns: list_columns, records: records, csv_lib: csv_lib }, :layout => false, :formats => [:csv])
       send_data(data, :type => Mime::CSV, :filename => "export.csv")
     end
 
@@ -86,7 +80,7 @@ module ActiveScaffold::Actions
       filter_config = active_scaffold_config.list_filter
       respond_to do |wants|
         wants.html do
-          if successful?
+          if successful? && (@record || @records)
             render(:partial => 'list_filter', :locals => { :filter_config => filter_config }, :layout => true)
           else
             return_to_main
@@ -117,7 +111,7 @@ module ActiveScaffold::Actions
 
         # set our joins
         joins = find_options[:include] unless find_options.nil?
-        self.active_scaffold_includes.concat [joins].flatten.uniq.compact unless joins.nil?
+        self.active_scaffold_outer_joins.concat [joins].flatten.uniq.compact unless joins.nil?
 
         active_scaffold_config.list.user.page = nil
         verbose_filter << "#{filter.label} (#{filter.verbose})" unless filter.verbose.nil?
